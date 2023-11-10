@@ -108,9 +108,58 @@ Devemos fazer com que o codigo das secçoes criticas seja pequeno em relacao ao 
 Duas threads estao para sempre à espera um do outro. Para nao termos esse problemas temos de ordenar a aquisiçao de locks(**lock ordering**), independentemente das operaçoes que queiramos fazer.
 EX: Se A quiser matar B e B quiser matar A, ambos tem de obter primeiro o lock do A e so depois o do B.
 
+# Multiplos locks
+----lock A----       -----lock B----
+Se tivermos um observador no meio, consegue ver um estado incoerente.
+----lock A---- 
+  ----lock B----
+Assim já resolveria o problema. Porem tornar isto mais eficiente
+----lock A----
+            ----lock B----
+Isto é um caso concreto do 2PL
+
+# 2PL (Two Phase locking)
+1-> Todos os locks tem de ser feitos antes de qualquer unlock.
+2-> Acesso a cada item de dados apensas é feito no periodo de tempo em que o lock é adquirido.
+
+1 fase é crescimento, ou seja, adquire locks. A degunda fase é de decrescimo, ou seja, fazer unlocks.
+O programa gerado é semelhante a 1 que tenha todos os locks adquiridos no incio e liberte todos no final.
+
+Exp:
+-----------lock A--------------
+        --lock B--
 
 
+# Locks vs Variavies
+Varias threads que acedam ao mesmo item de dados concorrentemente devem adquirir o mesmo lock. Para o fazer:
+-> O lock é uma variavel de instancia do objeto
 
+Quando temos variaveis globais:
+private **static** Lock l = new ReentrantLock();
 
+# Readers-Writers locks
+Para nao termos 1 lock por objeto.
+~~~
+interface ReadWriteLock{
+  Lock readLock();
+  Lock writeLock();
+}
+~~~
+Varios leitores podem estar na seccao critica em simultaneo. No entante, 1 unico escritor pode excluir todos os outros escritores e os leitores.
 
+# LockManager
+Para nao termos muitos locks em simultaneo em memoria, temos um dispensor de locks.
+~~~
+interface LockManager{
+  Lock lock(Object name);
+  Lock unlock(Object name);
+}
+~~~
+Se nã existir lock para o objeto que queremos, este cria-o. Aos air da seccao critica fazemos unlock e se ninguem o estiver a usar, podemos elimina-lo do mapa.
 
+# Variaveis de condição
+Queremos que uma thread espere por outras. Exp: Esperar para ter X jogadores para jogar. Tambem nao queremos estar numa espera ativa.
+~~~
+
+~~~
+Note-se que temos de libertaar o lock enquanto estamos a espera para que outros possam entrar nesta seccao.
