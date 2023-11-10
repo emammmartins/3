@@ -159,7 +159,162 @@ Se nã existir lock para o objeto que queremos, este cria-o. Aos air da seccao c
 
 # Variaveis de condição
 Queremos que uma thread espere por outras. Exp: Esperar para ter X jogadores para jogar. Tambem nao queremos estar numa espera ativa.
-~~~
+
+Note-se que temos de libertaar o lock enquanto estamos a espera para que outros possam entrar nesta seccao. Quando for acordado temos de repor o lock
 
 ~~~
-Note-se que temos de libertaar o lock enquanto estamos a espera para que outros possam entrar nesta seccao.
+Lock l = new ReentrantLock();
+Condition c = l.newCondition();
+~~~
+**c.await;** -> Suspende o thread e liberta o lock associado
+**c.signalAll();** -> Acorda todos os threads que foram suspendidos nessa condicao
+**c.signal();** -> Acorda apenas uma das threads que foram suspendidas nessa condicao
+
+Temos de ter em atencao que o lock seja utilizado pelos que acabaram de acordar e nao pelos novos que acabaram de chegar.
+Para tentar resolver o problema, temos a seguinte estrutura:
+~~~
+void joinGame(){
+  l.lock();
+  ready++;
+  while(ready<Min || playing>=Max){
+    c.await();
+  }
+  playing++;
+  c.signalAll();
+  l.unlock();
+}
+~~~
+O metodo c.await pode acordar de forma subtita pelo que devemos sempre usar o while para proteger o codigo.
+
+# Ordering
+Por omissao a thread que esta a espera pode ir para uma seccao critica livre. Se colocar-mos true no construtor do ReentrantLock, da mais prioridade os threads que estão à espera á mais tempo(no entanto nao garante que seja fifo).
+
+As threads que adormecem perdem a vez na fila de adquiricao do lockn quando acordam, em comparacao com os que chegaram depois do numero max.
+
+Solucao:
+~~~
+void joinTheGame(){
+  l.lock();
+  ticket=ready++;
+  c.signalAll();
+  while(ready<Min || playing>=Max || ticketTurn){
+    c.await();
+  }
+  playing++;
+  turn++;
+  c.signalAll();
+  l.unlock();
+}
+~~~
+Nota: o sinalALL() está sempre correto se tivermos o while porem é menos eficiente.
+
+# RW lock
+Para o leitor, este tem de esperar enquanto houver um escritor a escrever. O escritor tem de esperar enquanto houver leitores a ler ou outro escritor a escrever.
+
+~~~
+void readLock(){
+  l.lock();
+  while(a_writer)
+    c.await;
+  nr_readers++;
+  l.unlock();
+}
+void readUnlock(){
+  l.lock();
+  nr_readers--;
+  if(nr_readers==0) //Otimizacao para so acordar os escritores se nao houver leitores
+    c.signal();
+  l.unlock();
+}
+void writeLock(){
+  l.lock();
+  while(a_writer || nr_readers>0)
+    c.await();
+  a_writer=true;
+  l.unlock();
+}
+void writeUnlock(){
+  l.lock();
+  a_writer=false;
+  c.signalAll();
+  l.unlock();
+}
+~~~
+
+# Soup counter -> Perceber quando usar signalAll ou signal
+O consumidor tem de esperar pelo produtor se o balcao estiver vazio. Se o balao estiver cheio, o produtor nao pode colocar mais sopas nele.
+Se o produtor colocar uma sopa no balcao ele necessita apenas de acordar um consumidor. Se o balcao estiver cheio e o consumidor tirar uma sopa, entao este pode apenas sinalizar um dos produtores para colocar uma sopa.
+~~~
+Object get(){
+  l.lock();
+  while(q.isEmpty())
+    c.await();
+  s=q.remove();
+  c.signal();
+  l.unlock();
+}
+void put(Object s){
+  l.lock();
+  while(q.size()>=Max)
+    c.await()
+  q.add(s);
+  c.signal();
+  l.unlock();
+}
+~~~
+O problema é que ao usar o signal() desta forma podemos acordar tanto um produtor como um consumidor(estao na mesma variavel de condicao). **Bounded buffer** -> Este problema surge quando usamos diferentes condicoes associadas á mesma variavel de condicao.
+Passamos a ter duas condicoes:
+~~~
+Object get(){
+  l.lock();
+  while(q.isEmpty())
+    notEmpty.await();
+  q.remove();
+  notFull.signal();
+  l.unlock();
+}
+void put(Object s){
+  l.lock();
+  while(q.size()>=Max)
+    notFull.await()
+  q.add(s);
+  notEmpty.signal();
+  l.unlock();
+}
+~~~
+
+# Continuar RW lock
+Se entrarem muitos leitores os escritores que aparecem podem nunca conseguir entrar. Uma alternativa seria dar prioridade aos escritores. Porem, assim, podemos fazer o inverso, ou seja, os leitores podem bloquear os leitores. 
+
+Solucao: Proibe que hajam novos escritores a entrar e espera que todos os leitores que estavam a espera acabem de ler. Competem de uma forma mais justa.
+~~~
+void readLock(){
+  l.lock();
+  while(a_writer)
+    cw.await;
+  nr_readers++;
+  l.unlock();
+}
+void readUnlock(){
+  l.lock();
+  nr_readers--;
+  if(nr_readers==0) //Otimizacao para so acordar os escritores se nao houver leitores
+    cr.signal();
+  l.unlock();
+}
+void writeLock(){
+  l.lock();
+  while(a_writer)
+    cw.await();
+  a_writer=true;
+  while(nr_readers>0)
+    cr.await();
+  l.unlock();
+}
+void writeUnlock(){
+  l.lock();
+  a_writer=false;
+  cw.signalAll();
+  l.unlock();
+}
+~~~
